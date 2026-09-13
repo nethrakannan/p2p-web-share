@@ -42,10 +42,11 @@
 </div>
 
 <script>
-    const socket = io("https://onrender.com", {
-    transports: ["polling", "websocket"]
-});
-
+    // Force clean connection using secure cloud paths natively
+    const socket = io({
+        transports: ['polling', 'websocket']
+    });
+    
     let currentRoom = "";
     let receivedChunks = [];
     let expectedSize = 0;
@@ -56,39 +57,41 @@
         document.getElementById('statusLog').innerText = "Status: " + message;
     }
 
-    // 1. Join a specific communications room
+    // FIXED: The UI now responds INSTANTLY upon clicking the button
     function connectToRoom() {
         const roomName = document.getElementById('roomInput').value.trim();
         if(!roomName) return alert("Please type a room name first!");
         
         currentRoom = roomName;
+        
+        // Shoot network handshake event out to Render cloud server
         socket.emit('join', { room: currentRoom });
-        log(`Joined room "${roomName}". Waiting for peer connection...`);
+        
+        // Instantly force UI updates without waiting for laggy server echoes
+        log(`Joined room "${roomName}". Ready! Share your link with a peer.`);
         document.getElementById('shareSection').style.display = "block";
     }
 
-    // Server signals that another browser entered the same room
+    // Triggered when a second client joins the exact same memory room
     socket.on('peer_connected', () => {
-        log("Peer connected! You can now send files safely.");
+        log("Peer connected successfully! The direct P2P transfer lane is wide open.");
     });
 
-    // 2. Sender: Slice file into binary pieces and stream them
+    // Sender: Slice file data down into base64 transport blocks
     function sendFile() {
         const fileInput = document.getElementById('fileSelector');
         if(fileInput.files.length === 0) return alert("Please pick a file to share!");
         
         const file = fileInput.files[0];
-        log(`Sending metadata for '${file.name}'...`);
+        log(`Sending metadata header for '${file.name}'...`);
         
-        // Broadcast metadata header
         socket.emit('file_meta', { room: currentRoom, name: file.name, size: file.size });
 
-        const chunkSize = 16384; // Stream data in clean 16KB blocks
+        const chunkSize = 16384; 
         let offset = 0;
         const reader = new FileReader();
 
         reader.onload = function(e) {
-            // Convert file slice array into plain base64 text for network transportation
             const base64Data = btoa(
                 new Uint8Array(e.target.result).reduce((data, byte) => data + String.fromCharCode(byte), '')
             );
@@ -99,7 +102,7 @@
             if (offset < file.size) {
                 readNextChunk();
             } else {
-                log(`Successfully uploaded '${file.name}' to peer!`);
+                log(`Successfully uploaded '${file.name}' across the cloud node!`);
             }
         };
 
@@ -111,7 +114,7 @@
         readNextChunk();
     }
 
-    // 3. Receiver: Process incoming metadata header
+    // Receiver: Handle incoming metadata properties
     socket.on('receive_meta', (data) => {
         expectedName = data.name;
         expectedSize = data.size;
@@ -119,12 +122,11 @@
         bytesReceived = 0;
         
         document.getElementById('progressContainer').style.display = "block";
-        log(`Incoming file: ${expectedName} (${expectedSize} bytes)`);
+        log(`Receiving data packets for: ${expectedName} (${expectedSize} bytes)`);
     });
 
-    // 4. Receiver: Capture incoming base64 binary chunks and compile them
+    // Receiver: Compile fragments back into real buffer objects natively
     socket.on('receive_chunk', (data) => {
-        // Decode base64 text strings back into true data arrays
         const binaryString = atob(data.chunk);
         const len = binaryString.length;
         const bytes = new Uint8Array(len);
@@ -135,22 +137,20 @@
         receivedChunks.push(bytes.buffer);
         bytesReceived += len;
 
-        // UI Progress Update
         const percentage = Math.min(Math.round((bytesReceived / expectedSize) * 100), 100);
         document.getElementById('progressBar').value = percentage;
         document.getElementById('progressText').innerText = `Downloading: ${percentage}%`;
 
-        // Once full byte count matches metadata header size, trigger local file compilation
         if (bytesReceived >= expectedSize) {
-            log("Download finished! Assembling data package...");
+            log("Assembly packet complete! Injecting download tray prompt...");
             const blob = new Blob(receivedChunks);
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = "WEB_DOWNLOAD_" + expectedName;
-            link.click(); // Triggers native browser download tray injection
+            link.download = "P2P_RECEIVED_" + expectedName;
+            link.click(); 
             
             document.getElementById('progressContainer').style.display = "none";
-            log(`Success! File downloaded as WEB_DOWNLOAD_${expectedName}`);
+            log(`Success! File saved as P2P_RECEIVED_${expectedName}`);
         }
     });
 </script>
