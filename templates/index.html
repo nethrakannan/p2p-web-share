@@ -42,7 +42,10 @@
 </div>
 
 <script>
-    const socket = io();
+    const socket = io("https://onrender.com", {
+    transports: ["polling", "websocket"]
+});
+
     let currentRoom = "";
     let receivedChunks = [];
     let expectedSize = 0;
