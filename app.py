@@ -4,7 +4,8 @@ from flask_socketio import SocketIO, emit, join_room
 app = Flask(__name__)
 # The secret key keeps the connection session secure
 app.config['SECRET_KEY'] = 'p2p_secret_key_123!'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
 
 # 1. Route to serve the main HTML webpage
 @app.route('/')
