@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Web File Share</title>
+    <!-- Imports Socket.IO library to let the browser talk to Python -->
+    <script src="https://cloudflare.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f7f6; padding: 40px; text-align: center; color: #333; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h2 { color: #2c3e50; margin-bottom: 20px; }
+        input, button { width: 100%; padding: 12px; margin: 10px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #ccc; font-size: 16px; }
+        button { background: #3498db; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #2980b9; }
+        .status-box { margin-top: 20px; padding: 15px; border-radius: 6px; background: #eef2f3; font-weight: 500; font-size: 14px; word-break: break-all; }
+        #progressContainer { display: none; margin-top: 15px; }
+        progress { width: 100%; height: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🔗 P2P Web File Share</h2>
+    
+    <!-- Step 1: Connect to a Shared Room -->
+    <input type="text" id="roomInput" placeholder="Enter a Room Name (e.g., room123)">
+    <button id="connectBtn" onclick="connectToRoom()">Connect to Room</button>
+    
+    <!-- Step 2: Choose and Share File -->
+    <div id="shareSection" style="display:none; margin-top: 20px; border-top: 2px dashed #ddd; padding-top: 10px;">
+        <input type="file" id="fileSelector">
+        <button onclick="sendFile()">🚀 Share File with Peer</button>
+    </div>
+
+    <!-- Live Status Logs and Download Progress -->
+    <div class="status-box" id="statusLog">Status: Disconnected. Enter a room name to begin.</div>
+    <div id="progressContainer">
+        <span id="progressText">Downloading: 0%</span>
+        <progress id="progressBar" value="0" max="100"></progress>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    let currentRoom = "";
+    let receivedChunks = [];
+    let expectedSize = 0;
+    let expectedName = "";
+    let bytesReceived = 0;
+
+    function log(message) {
+        document.getElementById('statusLog').innerText = "Status: " + message;
+    }
+
+    // 1. Join a specific communications room
+    function connectToRoom() {
+        const roomName = document.getElementById('roomInput').value.trim();
+        if(!roomName) return alert("Please type a room name first!");
+        
+        currentRoom = roomName;
+        socket.emit('join', { room: currentRoom });
+        log(`Joined room "${roomName}". Waiting for peer connection...`);
+        document.getElementById('shareSection').style.display = "block";
+    }
+
+    // Server signals that another browser entered the same room
+    socket.on('peer_connected', () => {
+        log("Peer connected! You can now send files safely.");
+    });
+
+    // 2. Sender: Slice file into binary pieces and stream them
+    function sendFile() {
+        const fileInput = document.getElementById('fileSelector');
+        if(fileInput.files.length === 0) return alert("Please pick a file to share!");
+        
+        const file = fileInput.files[0];
+        log(`Sending metadata for '${file.name}'...`);
+        
+        // Broadcast metadata header
+        socket.emit('file_meta', { room: currentRoom, name: file.name, size: file.size });
+
+        const chunkSize = 16384; // Stream data in clean 16KB blocks
+        let offset = 0;
+        const reader = new FileReader();
+
+        reader.onload = function(e) {
+            // Convert file slice array into plain base64 text for network transportation
+            const base64Data = btoa(
+                new Uint8Array(e.target.result).reduce((data, byte) => data + String.fromCharCode(byte), '')
+            );
+            
+            socket.emit('file_chunk', { room: currentRoom, chunk: base64Data });
+            offset += chunkSize;
+
+            if (offset < file.size) {
+                readNextChunk();
+            } else {
+                log(`Successfully uploaded '${file.name}' to peer!`);
+            }
+        };
+
+        function readNextChunk() {
+            const slice = file.slice(offset, offset + chunkSize);
+            reader.readAsArrayBuffer(slice);
+        }
+
+        readNextChunk();
+    }
+
+    // 3. Receiver: Process incoming metadata header
+    socket.on('receive_meta', (data) => {
+        expectedName = data.name;
+        expectedSize = data.size;
+        receivedChunks = [];
+        bytesReceived = 0;
+        
+        document.getElementById('progressContainer').style.display = "block";
+        log(`Incoming file: ${expectedName} (${expectedSize} bytes)`);
+    });
+
+    // 4. Receiver: Capture incoming base64 binary chunks and compile them
+    socket.on('receive_chunk', (data) => {
+        // Decode base64 text strings back into true data arrays
+        const binaryString = atob(data.chunk);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        receivedChunks.push(bytes.buffer);
+        bytesReceived += len;
+
+        // UI Progress Update
+        const percentage = Math.min(Math.round((bytesReceived / expectedSize) * 100), 100);
+        document.getElementById('progressBar').value = percentage;
+        document.getElementById('progressText').innerText = `Downloading: ${percentage}%`;
+
+        // Once full byte count matches metadata header size, trigger local file compilation
+        if (bytesReceived >= expectedSize) {
+            log("Download finished! Assembling data package...");
+            const blob = new Blob(receivedChunks);
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = "WEB_DOWNLOAD_" + expectedName;
+            link.click(); // Triggers native browser download tray injection
+            
+            document.getElementById('progressContainer').style.display = "none";
+            log(`Success! File downloaded as WEB_DOWNLOAD_${expectedName}`);
+        }
+    });
+</script>
+</body>
+</html>
